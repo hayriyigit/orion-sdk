@@ -8,6 +8,7 @@
 #include "libavutil/rational.h"
 #include "libavutil/avstring.h"
 #include "libavutil/imgutils.h"
+#include "libavutil/error.h"
 #include "libswscale/swscale.h"
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(55,28,1)

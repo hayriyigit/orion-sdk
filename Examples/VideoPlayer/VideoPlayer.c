@@ -7,6 +7,7 @@
 #include "earthposition.h"
 #include "linearalgebra.h"
 #include "mathutilities.h"
+#include "NetworkVideoConfig.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,6 +25,7 @@ static void ProcessArgs(int argc, char **argv, OrionNetworkVideo_t *pSettings, c
 static int ProcessKeyboard(void);
 static void SaveJpeg(uint8_t *pData, const double Lla[NLLA], uint64_t TimeStamp, int Width, int Height, const char *pPath, int Quality);
 static void WriteExifData(struct jpeg_compress_struct *pInfo, const double Lla[NLLA], uint64_t TimeStamp);
+static int IsMulticastIp(uint32_t Ip);
 
 int main(int argc, char **argv)
 {
@@ -38,9 +40,14 @@ int main(int argc, char **argv)
     // Video port will default to 15004
     Settings.Port = 15004;
     Settings.StreamType = STREAM_TYPE_H264;
+    // TTL defaults to -1, which means gimbal will auto-detect multicast and set TTL=1 for multicast, TTL=64 for unicast
 
     // Process the command line arguments   
     ProcessArgs(argc, argv, &Settings, VideoUrl, RecordPath);
+
+    // Configure settings with proper multicast/unicast TTL
+    // This automatically detects multicast and sets TTL=1, or leaves TTL=-1 for unicast
+    ConfigureNetworkVideoForMulticast(&Settings);
 
     // Send the network video settings
     encodeOrionNetworkVideoPacketStructure(&PktOut, &Settings);
