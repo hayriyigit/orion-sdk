@@ -50,9 +50,21 @@ When both Skylink and another ffmpeg process receive multicast:
 
 ### VideoPlayer.c
 - **Line 295**: Creates UDP URL but doesn't detect multicast addresses
-- No differentiation between unicast and multicast handling
+- **Line 36-40**: `OrionNetworkVideo_t` structure initialized but TTL not set for multicast
+- **Line 46**: Sends video configuration to gimbal without explicit TTL setting
+- No differentiation between unicast and multicast handling in gimbal configuration
 
 ## Implemented Fixes
+
+### Fix 0: Configure Gimbal TTL for Multicast ✅
+**Location**: `VideoPlayer.c` - Added `IsMulticastIp()` helper and TTL configuration
+
+**Changes**:
+- Added helper function to detect multicast IP addresses from the `OrionNetworkVideo_t.DestIp` field
+- When multicast IP is detected, explicitly sets `Settings.Ttl = 1` in the `OrionNetworkVideo_t` structure
+- This ensures the gimbal sends multicast packets with proper TTL=1 (even though gimbal auto-detects, being explicit is better)
+- The gimbal's `OrionNetworkVideo` packet supports TTL field (defaults to -1 for auto-detection)
+- **Important**: This configures the **gimbal's sender** to use proper multicast TTL, which is critical for multicast to work correctly
 
 ### Fix 1: Added Multicast Detection and Options ✅
 **Location**: `StreamDecoder.c` - Added `IsMulticastAddress()` helper function and multicast detection

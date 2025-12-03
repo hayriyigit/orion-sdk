@@ -24,6 +24,7 @@ static void ProcessArgs(int argc, char **argv, OrionNetworkVideo_t *pSettings, c
 static int ProcessKeyboard(void);
 static void SaveJpeg(uint8_t *pData, const double Lla[NLLA], uint64_t TimeStamp, int Width, int Height, const char *pPath, int Quality);
 static void WriteExifData(struct jpeg_compress_struct *pInfo, const double Lla[NLLA], uint64_t TimeStamp);
+static int IsMulticastIp(uint32_t Ip);
 
 int main(int argc, char **argv)
 {
@@ -38,9 +39,19 @@ int main(int argc, char **argv)
     // Video port will default to 15004
     Settings.Port = 15004;
     Settings.StreamType = STREAM_TYPE_H264;
+    // TTL defaults to -1, which means gimbal will auto-detect multicast and set TTL=1 for multicast, TTL=64 for unicast
 
     // Process the command line arguments   
     ProcessArgs(argc, argv, &Settings, VideoUrl, RecordPath);
+
+    // If this is a multicast address, explicitly set TTL to 1 for proper multicast behavior
+    // (The gimbal would auto-detect this, but being explicit ensures correct configuration)
+    if (IsMulticastIp(Settings.DestIp))
+    {
+        Settings.Ttl = 1;  // Multicast TTL
+    }
+    // For unicast, we can leave TTL at -1 (default) or explicitly set to 64
+    // Leaving at -1 lets the gimbal use its default unicast TTL
 
     // Send the network video settings
     encodeOrionNetworkVideoPacketStructure(&PktOut, &Settings);
@@ -270,6 +281,16 @@ static void KillProcess(const char *pMessage, int Value)
     exit(Value);
 
 }// KillProcess
+
+// Helper function to check if an IP address is in the multicast range (224.0.0.0 - 239.255.255.255)
+static int IsMulticastIp(uint32_t Ip)
+{
+    // Extract the first octet from the IP address (network byte order)
+    uint8_t FirstOctet = (Ip >> 24) & 0xFF;
+    
+    // Check if first octet is in multicast range (224-239)
+    return (FirstOctet >= 224 && FirstOctet <= 239);
+}
 
 static void ProcessArgs(int argc, char **argv, OrionNetworkVideo_t *pSettings, char *pVideoUrl, char *pRecordPath)
 {
