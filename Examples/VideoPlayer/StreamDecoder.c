@@ -3,6 +3,28 @@
 #include "FFmpeg.h"
 
 #include <string.h>
+#include <stdlib.h>
+
+// Helper function to check if an IP address is in the multicast range (224.0.0.0 - 239.255.255.255)
+static int IsMulticastAddress(const char *pUrl)
+{
+    // Check if URL starts with udp://
+    if (strncmp(pUrl, "udp://", 6) != 0)
+        return 0;
+    
+    // Extract IP address from URL (format: udp://ip:port or udp://@ip:port)
+    const char *pIpStart = pUrl + 6;
+    if (*pIpStart == '@')
+        pIpStart++;  // Skip @ if present
+    
+    // Parse IP address
+    unsigned int octets[4];
+    if (sscanf(pIpStart, "%3u.%3u.%3u.%3u", &octets[0], &octets[1], &octets[2], &octets[3]) != 4)
+        return 0;
+    
+    // Check if first octet is in multicast range (224-239)
+    return (octets[0] >= 224 && octets[0] <= 239);
+}
 
 // This fixes issue with using ffmpeg > v4
 #ifndef CODEC_FLAG_GLOBAL_HEADER
@@ -37,9 +59,33 @@ int StreamOpen(const char *pUrl, const char *pRecordPath)
     // Allocate a new format context
     pInputContext = avformat_alloc_context();
 
-    // Have avformat_open_input timeout after 5s
+    // Configure FFmpeg options for UDP stream
     AVDictionary *pOptions = 0;
     av_dict_set(&pOptions, "timeout", "5000000", 0);
+    
+    // If this is a multicast address, add multicast-specific options
+    if (IsMulticastAddress(pUrl))
+    {
+        // Allow multiple processes to bind to the same multicast address/port
+        av_dict_set(&pOptions, "reuse", "1", 0);
+        
+        // Increase FIFO buffer size to handle multicast packet bursts (5MB)
+        av_dict_set(&pOptions, "fifo_size", "5000000", 0);
+        
+        // Don't fail on buffer overruns - handle gracefully
+        av_dict_set(&pOptions, "overrun_nonfatal", "1", 0);
+        
+        // Increase UDP socket receive buffer size (2MB)
+        av_dict_set(&pOptions, "buffer_size", "2097152", 0);
+        
+        // Set multicast TTL (if needed)
+        av_dict_set(&pOptions, "ttl", "1", 0);
+    }
+    else
+    {
+        // For unicast, still increase buffer size to prevent packet loss
+        av_dict_set(&pOptions, "buffer_size", "1048576", 0);  // 1MB for unicast
+    }
 
     // If the stream doesn't open
     if (avformat_open_input(&pInputContext, pUrl, NULL, &pOptions) < 0)
@@ -162,7 +208,8 @@ int StreamProcess(void)
     int NewVideo = 0, NewMetaData = (pInputContext->nb_streams < 2);
 
     // As long as we can keep reading packets from the UDP socket
-    while (av_read_frame(pInputContext, &Packet) >= 0)
+    int ret;
+    while ((ret = av_read_frame(pInputContext, &Packet)) >= 0)
     {
         int Index = Packet.stream_index;
 
@@ -321,6 +368,18 @@ int StreamProcess(void)
         // Return 1 if both a video frame and KLV packet have been read in
         if (NewVideo && NewMetaData)
             return 1;
+    }
+    
+    // Handle read errors gracefully
+    if (ret < 0)
+    {
+        // AVERROR(EAGAIN) means no data available right now - not an error
+        if (ret == AVERROR(EAGAIN))
+            return 0;
+        
+        // For other errors, log but don't fail completely
+        // The decoder may recover on the next successful read
+        // Note: AV_LOG_QUIET is set, so errors won't print unless changed
     }
 
     // No new data if we made it here
